@@ -4,7 +4,7 @@ import axios from "axios";
 import GeneralContext from "./GeneralContext";
 import "./BuyActionWindow.css";
 
-const BuyActionWindow = ({ uid }) => {
+const BuyActionWindow = ({ uid, mode = "BUY" }) => {
   const generalContext = useContext(GeneralContext);
   const [stockQuantity, setStockQuantity] = useState(1);
   const [stockPrice, setStockPrice] = useState(0.0);
@@ -17,7 +17,7 @@ const BuyActionWindow = ({ uid }) => {
         name: uid,
         qty: stockQuantity,
         price: stockPrice,
-        mode: "BUY",
+        mode: mode,        // ← uses prop instead of hardcoded "BUY"
       },
       {
         withCredentials: true,
@@ -62,8 +62,11 @@ const BuyActionWindow = ({ uid }) => {
       <div className="buttons">
         <span>Margin required ₹140.65</span>
         <div>
-          <Link className="btn btn-blue" onClick={handleBuyClick}>
-            Buy
+          <Link
+            className={mode === "BUY" ? "btn btn-blue" : "btn btn-red"}
+            onClick={handleBuyClick}
+          >
+            {mode === "BUY" ? "Buy" : "Sell"}
           </Link>
           <Link to="" className="btn btn-grey" onClick={handleCancelClick}>
             Cancel

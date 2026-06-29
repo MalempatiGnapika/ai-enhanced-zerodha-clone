@@ -8,7 +8,6 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 
-
 const UserModel = require("./model/UserModel");
 const HoldingsModel = require("./model/HoldingsModel");
 const PositionsModel = require("./model/PositionsModel");
@@ -93,7 +92,11 @@ app.post("/signup", async (req, res) => {
       return res.status(409).json({ success: false, message: "Email already registered." });
 
     const hashed = await bcrypt.hash(password, 10);
-    const newUser = new UserModel({ name: name.trim(), email: email.toLowerCase().trim(), password: hashed });
+    const newUser = new UserModel({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashed,
+    });
     await newUser.save();
 
     const token = jwt.sign(
@@ -163,7 +166,8 @@ app.get("/allHoldings", authenticateToken, async (req, res) => {
   try {
     const data = await HoldingsModel.find({});
     res.json(data);
-  } catch {
+  } catch (err) {
+    console.error("Holdings error:", err);
     res.status(500).json({ message: "Error fetching holdings." });
   }
 });
@@ -172,7 +176,8 @@ app.get("/allPositions", authenticateToken, async (req, res) => {
   try {
     const data = await PositionsModel.find({});
     res.json(data);
-  } catch {
+  } catch (err) {
+    console.error("Positions error:", err);
     res.status(500).json({ message: "Error fetching positions." });
   }
 });
@@ -183,12 +188,22 @@ app.post("/newOrder", authenticateToken, async (req, res) => {
     const order = new OrdersModel({ name, qty, price, mode });
     await order.save();
     res.status(201).json({ success: true, message: "Order placed!" });
-  } catch {
+  } catch (err) {
+    console.error("Order error:", err);
     res.status(500).json({ message: "Error placing order." });
   }
 });
 
-// ─── AI ASSISTANT — GEMINI API ────────────────────────────────────────────────
+app.get("/allOrders", authenticateToken, async (req, res) => {
+  try {
+    const data = await OrdersModel.find({});
+    res.json(data);
+  } catch (err) {
+    console.error("Orders error:", err);
+    res.status(500).json({ message: "Error fetching orders." });
+  }
+});
+
 app.post("/ai-assistant", authenticateToken, async (req, res) => {
   try {
     const { message } = req.body;
@@ -197,83 +212,37 @@ app.post("/ai-assistant", authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, message: "Message cannot be empty." });
     }
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
-    if (!GEMINI_API_KEY) {
-      console.warn("⚠️  GEMINI_API_KEY not set in .env");
+    const COHERE_API_KEY = process.env.COHERE_API_KEY;
+    if (!COHERE_API_KEY) {
       return res.status(503).json({
         success: false,
-        message: "AI assistant not configured. Add GEMINI_API_KEY to backend/.env",
+        message: "AI not configured. Add COHERE_API_KEY to backend/.env",
       });
     }
 
-    // ✅ Gemini API endpoint — gemini-1.5-flash is free tier
-    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-    const systemPrompt = `You are Kite AI, a helpful stock market educational assistant inside a trading dashboard similar to Zerodha Kite. 
-
-You help Indian investors understand:
-- NSE/BSE stock market concepts and terminology
-- How to read portfolio holdings, positions, P&L
-- Mutual funds, ETFs, SIP, F&O basics
-- SEBI rules, STCG/LTCG tax awareness
-- How to read charts and indicators (education only)
-- General investment concepts
-
-STRICT RULES:
-1. NEVER give specific buy/sell recommendations
-2. NEVER say "invest in X stock"
-3. Always add this disclaimer when relevant: "⚠️ Educational only — not financial advice. Consult a SEBI-registered advisor."
-4. Keep answers concise, friendly, beginner-friendly
-5. Use Indian context: ₹, NSE/BSE, SEBI, Indian tax laws
-6. If asked something unrelated to finance/investing, politely redirect
-
-User question: ${message.trim()}`;
-
-    const response = await fetch(GEMINI_URL, {
+    const response = await fetch("https://api.cohere.com/v1/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${COHERE_API_KEY}`,
+      },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: systemPrompt }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 600,
-        },
-        safetySettings: [
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-        ],
+       model: "command-a-03-2025",
+        message: message.trim(),
+        preamble: `You are Kite AI, a stock market educational assistant for Indian investors using Zerodha. Answer questions about NSE/BSE stocks, portfolio, P&L, SIP, F&O, mutual funds, SEBI rules, STCG/LTCG tax. Never give specific buy/sell advice. Always add: "Educational only — not financial advice." Keep answers concise and beginner-friendly. Use ₹ and Indian market context.`,
+        max_tokens: 400,
+        temperature: 0.7,
       }),
     });
 
     const data = await response.json();
 
-    // Handle Gemini API errors
     if (!response.ok) {
-      console.error("Gemini API error:", JSON.stringify(data));
-
-      // Common error: invalid API key
-      if (data?.error?.code === 400 || data?.error?.status === "INVALID_ARGUMENT") {
-        return res.status(400).json({ success: false, message: "Invalid Gemini API key. Check your .env file." });
-      }
-      if (data?.error?.code === 403) {
-        return res.status(403).json({ success: false, message: "Gemini API key is not authorized. Check Google AI Studio." });
-      }
-      if (data?.error?.code === 429) {
-        return res.status(429).json({ success: false, message: "Gemini API rate limit reached. Please wait a moment." });
-      }
-
+      console.error("Cohere error:", JSON.stringify(data));
       return res.status(502).json({ success: false, message: "AI service error. Please try again." });
     }
 
-    // Extract reply text from Gemini response structure
-    const reply =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "Sorry, I could not generate a response. Please try again.";
-
+    const reply = data?.text || "Sorry, I could not generate a response.";
     return res.json({ success: true, reply });
 
   } catch (error) {
@@ -281,9 +250,8 @@ User question: ${message.trim()}`;
     return res.status(500).json({ success: false, message: "Server error in AI assistant." });
   }
 });
-
 // ─── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`✅ Backend running at http://localhost:${PORT}`);
-  console.log(`   Gemini AI: ${process.env.GEMINI_API_KEY ? "✅ Key found" : "❌ GEMINI_API_KEY missing in .env"}`);
+console.log(`   Cohere AI: ${process.env.COHERE_API_KEY ? "✅ Key found" : "❌ COHERE_API_KEY missing in .env"}`);
 });
